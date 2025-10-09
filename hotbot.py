@@ -1,0 +1,174 @@
+import os
+import asyncio
+import feedparser
+import aiohttp
+from pathlib import Path
+from telethon import TelegramClient, events
+from dotenv import load_dotenv
+from datetime import datetime
+from bs4 import BeautifulSoup
+import re
+from collections import Counter
+
+# 1️⃣ Определяем путь к текущей папке и .env
+current_dir = Path(__file__).parent
+env_file = current_dir / ".env"
+print(f"Ищем .env файл по пути: {env_file}")
+
+# 2️⃣ Загружаем .env
+if not env_file.exists():
+    raise FileNotFoundError(f"❌ Файл .env не найден по пути: {env_file}")
+load_dotenv(dotenv_path=env_file)
+
+# 3️⃣ Функция безопасного получения переменных
+def get_env_var(name, cast_type=str):
+    value = os.getenv(name)
+    if value is None:
+        raise ValueError(f"❌ Переменная {name} не найдена в .env")
+    try:
+        return cast_type(value)
+    except ValueError:
+        raise ValueError(f"❌ Значение переменной {name} ('{value}') не соответствует типу {cast_type.__name__}")
+
+# 4️⃣ Получаем переменные окружения
+api_id = get_env_var("API_ID", int)
+api_hash = get_env_var("API_HASH")
+bot_token = get_env_var("BOT_TOKEN")
+user_id = get_env_var("USER_ID", int)
+
+# 5️⃣ Создаём Telegram клиента как БОТА
+client = TelegramClient('monitor_session', api_id, api_hash)
+
+# 6️⃣ Ключевые слова для поиска
+keywords = [
+    "умер", "умер актер", "умер писатель", "туристка", "умер заслуженный",
+    "умер певец", "умер артист", "мертвым", "тело", "скончался", "ушел из жизни",
+    "dead", "passed away"
+]
+
+# 7️⃣ RSS фиды для мониторинга
+rss_urls = [
+    "https://www.tass.ru/rss/v2.xml",
+    "https://ria.ru/export/rss2/index.xml",
+    "https://www.interfax.ru/rss.asp",
+    "https://russian.rt.com/rss",
+    "https://lenta.ru/rss/news",
+    "http://feeds.reuters.com/Reuters/worldNews",
+    "https://apnews.com/apf-topnews?format=rss"
+]
+
+# 8️⃣ Хранилище уже отправленных ссылок
+sent_links = set()
+
+# 9️⃣ Функция проверки RSS с логированием
+async def check_rss():
+    new_links_count = 0
+    for url in rss_urls:
+        try:
+            feed = feedparser.parse(url)
+            for entry in feed.entries:
+                title = entry.title.lower()
+                if any(word in title for word in keywords):
+                    if entry.link not in sent_links:
+                        sent_links.add(entry.link)
+                        new_links_count += 1
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🔔 [RSS] Новость: {entry.title}")
+                        await client.send_message(
+                            user_id,
+                            f"⚡ [RSS] {entry.title}\n{entry.link}"
+                        )
+        except Exception as e:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ❌ Ошибка при обработке RSS {url}: {e}")
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ✅ Проверка RSS завершена. Новых ссылок: {new_links_count}")
+
+# 🔟 Слежение за страницей памяти на kino-teatr.ru
+mourn_url = "https://www.kino-teatr.ru/mourn/y2025/m11/"
+known_profiles = set()
+
+async def check_mourn_page():
+    global known_profiles
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(mourn_url) as resp:
+                if resp.status == 200:
+                    html = await resp.text()
+                    soup = BeautifulSoup(html, "html.parser")
+
+                    profile_links = [
+                        "https://www.kino-teatr.ru" + a["href"]
+                        for a in soup.select("div.actor_list a")
+                        if a.get("href") and a["href"].startswith("/kino/acter/")
+                    ]
+
+                    new_profiles = [link for link in profile_links if link not in known_profiles]
+
+                    for link in new_profiles:
+                        known_profiles.add(link)
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🔔 [MOURN] Новая анкета: {link}")
+                        await client.send_message(
+                            user_id,
+                            f"⚰️ [MOURN] Новая анкета опубликована:\n{link}"
+                        )
+                else:
+                    print(f"❌ Ошибка загрузки {mourn_url}: HTTP {resp.status}")
+    except Exception as e:
+        print(f"❌ Ошибка при проверке {mourn_url}: {e}")
+
+# 1️⃣1️⃣ Проверка ключевых слов на tass.ru/feed
+async def check_tass_keywords():
+    url = "https://tass.ru/feed"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    print(f"❌ Ошибка загрузки TASS: HTTP {resp.status}")
+                    return
+
+                html = await resp.text()
+                soup = BeautifulSoup(html, "html.parser")
+
+                articles = soup.find_all("article")
+                for article in articles:
+                    title_tag = article.find("a")
+                    if not title_tag:
+                        continue
+
+                    title = title_tag.get_text(" ", strip=True).lower()
+                    link = title_tag["href"]
+
+                    if not link.startswith("http"):
+                        link = "https://tass.ru" + link
+
+                    if any(word in title for word in keywords):
+                        if link not in sent_links:
+                            sent_links.add(link)
+                            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🔔 [TASS] Новость: {title}")
+                            await client.send_message(
+                                user_id,
+                                f"⚡ [TASS] {title}\n{link}"
+                            )
+    except Exception as e:
+        print(f"❌ Ошибка при проверке TASS: {e}")
+
+# 1️⃣2️⃣ Цикл проверки
+async def periodic_rss_check():
+    while True:
+        await check_rss()
+        await check_mourn_page()
+        await check_tass_keywords()
+        await asyncio.sleep(60)
+
+# 1️⃣3️⃣ Команда /ping
+@client.on(events.NewMessage(pattern="/ping"))
+async def ping_handler(event):
+    await event.respond("pong ✅")
+
+# 1️⃣4️⃣ Запуск бота
+async def main():
+    await client.start(bot_token=bot_token)
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ✅ Бот запущен. Мониторинг каждые 60 секунд...")
+    asyncio.create_task(periodic_rss_check())
+    await client.run_until_disconnected()
+
+if __name__ == "__main__":
+    client.loop.run_until_complete(main())
