@@ -2,6 +2,7 @@ import os
 import asyncio
 import feedparser
 import aiohttp
+from aiohttp import web
 from pathlib import Path
 from telethon import TelegramClient, events
 from dotenv import load_dotenv
@@ -163,12 +164,42 @@ async def periodic_rss_check():
 async def ping_handler(event):
     await event.respond("pong ✅")
 
-# 1️⃣4️⃣ Запуск бота
+# 1️⃣4️⃣ Webhook сервер
+async def webhook(request):
+    try:
+        data = await request.json()
+        update = await client.updates(data)
+        await client.process_update(update)
+        return web.Response(text="OK")
+    except Exception as e:
+        print(f"❌ Webhook error: {e}")
+        return web.Response(text="Error", status=500)
+
+# 1️⃣5️⃣ Запуск бота
 async def main():
+    # Запускаем клиент
     await client.start(bot_token=bot_token)
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ✅ Бот запущен. Мониторинг каждые 60 секунд...")
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ✅ Бот запущен")
+
+    # Устанавливаем webhook
+    webhook_url = os.getenv("WEBHOOK_URL", "https://hotbot1-4.onrender.com/webhook")
+    await client.set_webhook(webhook_url)
+    print(f"Webhook установлен: {webhook_url}")
+
+    # Запускаем периодическую проверку
     asyncio.create_task(periodic_rss_check())
-    await client.run_until_disconnected()
+
+    # Запускаем aiohttp сервер
+    app = web.Application()
+    app.router.add_post('/webhook', webhook)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 10000)
+    await site.start()
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ✅ Webhook сервер запущен на порту 10000")
+
+    # Держим приложение активным
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
     client.loop.run_until_complete(main())
