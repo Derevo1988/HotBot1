@@ -11,43 +11,36 @@ from bs4 import BeautifulSoup
 import re
 from collections import Counter
 
-# 1️⃣ Определяем путь к текущей папке и .env
-current_dir = Path(__file__).parent
-env_file = current_dir / ".env"
-print(f"Ищем .env файл по пути: {env_file}")
+# 1️⃣ Загружаем .env (если есть, для локального запуска)
+load_dotenv()  # Без проверки существования файла
 
-# 2️⃣ Загружаем .env
-if not env_file.exists():
-    raise FileNotFoundError(f"❌ Файл .env не найден по пути: {env_file}")
-load_dotenv(dotenv_path=env_file)
-
-# 3️⃣ Функция безопасного получения переменных
+# 2️⃣ Функция безопасного получения переменных
 def get_env_var(name, cast_type=str):
     value = os.getenv(name)
     if value is None:
-        raise ValueError(f"❌ Переменная {name} не найдена в .env")
+        raise ValueError(f"❌ Переменная {name} не найдена в окружении")
     try:
         return cast_type(value)
     except ValueError:
         raise ValueError(f"❌ Значение переменной {name} ('{value}') не соответствует типу {cast_type.__name__}")
 
-# 4️⃣ Получаем переменные окружения
+# 3️⃣ Получаем переменные окружения
 api_id = get_env_var("API_ID", int)
 api_hash = get_env_var("API_HASH")
 bot_token = get_env_var("BOT_TOKEN")
 user_id = get_env_var("USER_ID", int)
 
-# 5️⃣ Создаём Telegram клиента как БОТА
+# 4️⃣ Создаём Telegram клиента как БОТА
 client = TelegramClient('monitor_session', api_id, api_hash)
 
-# 6️⃣ Ключевые слова для поиска
+# 5️⃣ Ключевые слова для поиска
 keywords = [
     "умер", "умер актер", "умер писатель", "туристка", "умер заслуженный",
     "умер певец", "умер артист", "мертвым", "тело", "скончался", "ушел из жизни",
     "dead", "passed away"
 ]
 
-# 7️⃣ RSS фиды для мониторинга
+# 6️⃣ RSS фиды для мониторинга
 rss_urls = [
     "https://www.tass.ru/rss/v2.xml",
     "https://ria.ru/export/rss2/index.xml",
@@ -58,10 +51,10 @@ rss_urls = [
     "https://apnews.com/apf-topnews?format=rss"
 ]
 
-# 8️⃣ Хранилище уже отправленных ссылок
+# 7️⃣ Хранилище уже отправленных ссылок
 sent_links = set()
 
-# 9️⃣ Функция проверки RSS с логированием
+# 8️⃣ Функция проверки RSS с логированием
 async def check_rss():
     new_links_count = 0
     for url in rss_urls:
@@ -82,7 +75,7 @@ async def check_rss():
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ❌ Ошибка при обработке RSS {url}: {e}")
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ✅ Проверка RSS завершена. Новых ссылок: {new_links_count}")
 
-# 🔟 Слежение за страницей памяти на kino-teatr.ru
+# 9️⃣ Слежение за страницей памяти на kino-teatr.ru
 mourn_url = "https://www.kino-teatr.ru/mourn/y2025/m11/"
 known_profiles = set()
 
@@ -115,7 +108,7 @@ async def check_mourn_page():
     except Exception as e:
         print(f"❌ Ошибка при проверке {mourn_url}: {e}")
 
-# 1️⃣1️⃣ Проверка ключевых слов на tass.ru/feed
+# 🔟 Проверка ключевых слов на tass.ru/feed
 async def check_tass_keywords():
     url = "https://tass.ru/feed"
     try:
@@ -151,7 +144,7 @@ async def check_tass_keywords():
     except Exception as e:
         print(f"❌ Ошибка при проверке TASS: {e}")
 
-# 1️⃣2️⃣ Цикл проверки
+# 1️⃣1️⃣ Цикл проверки
 async def periodic_rss_check():
     while True:
         await check_rss()
@@ -159,12 +152,12 @@ async def periodic_rss_check():
         await check_tass_keywords()
         await asyncio.sleep(60)
 
-# 1️⃣3️⃣ Команда /ping
+# 1️⃣2️⃣ Команда /ping
 @client.on(events.NewMessage(pattern="/ping"))
 async def ping_handler(event):
     await event.respond("pong ✅")
 
-# 1️⃣4️⃣ Webhook сервер
+# 1️⃣3️⃣ Webhook сервер
 async def webhook(request):
     try:
         data = await request.json()
@@ -175,7 +168,7 @@ async def webhook(request):
         print(f"❌ Webhook error: {e}")
         return web.Response(text="Error", status=500)
 
-# 1️⃣5️⃣ Запуск бота
+# 1️⃣4️⃣ Запуск бота
 async def main():
     # Запускаем клиент
     await client.start(bot_token=bot_token)
