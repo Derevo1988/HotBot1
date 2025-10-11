@@ -1,4 +1,5 @@
-pytelegrambotapi
-python-dotenv
-feedparser
-aiohttp
+telethon==1.36.0
+feedparser==6.0.11
+aiohttp==3.10.10
+python-dotenv==1.0.1
+beautifulsoup4==4.12.3
