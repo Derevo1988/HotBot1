@@ -5,14 +5,14 @@ import aiohttp
 from aiohttp import web
 from pathlib import Path
 from telethon import TelegramClient, events
-from dotenv import load_dotenv
 from datetime import datetime
 from bs4 import BeautifulSoup
 import re
 from collections import Counter
 
 # 1️⃣ Загружаем .env (если есть, для локального запуска)
-load_dotenv()  # Без проверки существования файла
+from dotenv import load_dotenv
+load_dotenv()
 
 # 2️⃣ Функция безопасного получения переменных
 def get_env_var(name, cast_type=str):
@@ -152,21 +152,30 @@ async def periodic_rss_check():
         await check_tass_keywords()
         await asyncio.sleep(60)
 
-# 1️⃣2️⃣ Команда /ping
-@client.on(events.NewMessage(pattern="/ping"))
-async def ping_handler(event):
-    await event.respond("pong ✅")
-
-# 1️⃣3️⃣ Webhook сервер
+# 1️⃣2️⃣ Webhook сервер
 async def webhook(request):
     try:
         data = await request.json()
-        update = await client.updates(data)
-        await client.process_update(update)
+        # Обрабатываем обновление через Telethon
+        updates = [data] if isinstance(data, dict) else data.get('updates', [])
+        for update in updates:
+            event = events.NewMessage.Event(update)
+            await client._handle_update(event)
         return web.Response(text="OK")
     except Exception as e:
         print(f"❌ Webhook error: {e}")
         return web.Response(text="Error", status=500)
+
+# 1️⃣3️⃣ Установка webhook через Bot API
+async def set_webhook_manually(bot_token, webhook_url):
+    async with aiohttp.ClientSession() as session:
+        url = f"https://api.telegram.org/bot{bot_token}/setWebhook?url={webhook_url}"
+        async with session.get(url) as resp:
+            result = await resp.json()
+            if result.get("ok"):
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ✅ Webhook установлен: {webhook_url}")
+            else:
+                print(f"❌ Ошибка установки webhook: {result}")
 
 # 1️⃣4️⃣ Запуск бота
 async def main():
@@ -176,8 +185,7 @@ async def main():
 
     # Устанавливаем webhook
     webhook_url = os.getenv("WEBHOOK_URL", "https://hotbot1-4.onrender.com/webhook")
-    await client.set_webhook(webhook_url)
-    print(f"Webhook установлен: {webhook_url}")
+    await set_webhook_manually(bot_token, webhook_url)
 
     # Запускаем периодическую проверку
     asyncio.create_task(periodic_rss_check())
@@ -193,6 +201,11 @@ async def main():
 
     # Держим приложение активным
     await asyncio.Event().wait()
+
+# 1️⃣5️⃣ Команда /ping
+@client.on(events.NewMessage(pattern="/ping"))
+async def ping_handler(event):
+    await event.respond("pong ✅")
 
 if __name__ == "__main__":
     client.loop.run_until_complete(main())
