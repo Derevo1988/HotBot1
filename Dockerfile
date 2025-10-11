@@ -14,4 +14,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Команда для запуска вашего бота
-CMD ["python", "HotBot1.py"]
+CMD ["python", "hotbot.py"]
